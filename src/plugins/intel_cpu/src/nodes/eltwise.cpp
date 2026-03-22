@@ -77,6 +77,7 @@
 #include "openvino/op/less.hpp"
 #include "openvino/op/less_eq.hpp"
 #include "openvino/op/log.hpp"
+#include "openvino/op/log1p.hpp"
 #include "openvino/op/logical_and.hpp"
 #include "openvino/op/logical_not.hpp"
 #include "openvino/op/logical_or.hpp"
@@ -402,6 +403,10 @@ const std::map<const ov::DiscreteTypeInfo, Eltwise::Initializer>& Eltwise::getIn
          []([[maybe_unused]] const std::shared_ptr<ov::Node>& op, Eltwise& node) {
              node.algorithm = Algorithm::EltwiseLog;
          }},
+        {ov::op::v16::Log1p::get_type_info_static(),
+         []([[maybe_unused]] const std::shared_ptr<ov::Node>& op, Eltwise& node) {
+             node.algorithm = Algorithm::EltwiseLog1p;
+         }},
         {op::v13::BitwiseAnd::get_type_info_static(),
          []([[maybe_unused]] const std::shared_ptr<ov::Node>& op, Eltwise& node) {
              node.algorithm = Algorithm::EltwiseBitwiseAnd;
@@ -496,6 +501,7 @@ size_t Eltwise::getOpInputsNum() const {
     case Algorithm::EltwiseRoundHalfAwayFromZero:
     case Algorithm::EltwiseSoftSign:
     case Algorithm::EltwiseLog:
+    case Algorithm::EltwiseLog1p:
         return 1;
     case Algorithm::EltwiseAdd:
     case Algorithm::EltwiseSubtract:
@@ -741,6 +747,7 @@ bool Eltwise::canFuse(const NodePtr& node) const {
 
     if (any_of(getAlgorithm(),
                Algorithm::EltwiseLog,
+               Algorithm::EltwiseLog1p,
                Algorithm::EltwiseBitwiseAnd,
                Algorithm::EltwiseBitwiseNot,
                Algorithm::EltwiseBitwiseOr,
@@ -749,6 +756,7 @@ bool Eltwise::canFuse(const NodePtr& node) const {
                Algorithm::EltwiseBitwiseRightShift) ||
         any_of(node->getAlgorithm(),
                Algorithm::EltwiseLog,
+               Algorithm::EltwiseLog1p,
                Algorithm::EltwiseBitwiseAnd,
                Algorithm::EltwiseBitwiseNot,
                Algorithm::EltwiseBitwiseOr,
