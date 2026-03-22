@@ -244,6 +244,15 @@ void EltwiseRefExecutor<T, Enable>::exec(const jit_eltwise_call_args_ptrs& args_
         return;
     }
 
+    if (this->m_opData.algo == Algorithm::EltwiseLog1p) {
+        const T* src_ptr_f = reinterpret_cast<const T*>(args_ptrs.src_ptr[0]);
+        T* dst_ptr_f = reinterpret_cast<T*>(args_ptrs.dst_ptr);
+        cpu_parallel->parallel_for(this->m_fullWorkAmount, [&](size_t i) {
+            dst_ptr_f[i] = std::log1p(src_ptr_f[i]);
+        });
+        return;
+    }
+
     if (this->m_opData.algo == Algorithm::EltwisePowerStatic) {
         const T* src_ptr_f = reinterpret_cast<const T*>(args_ptrs.src_ptr[0]);
         T* dst_ptr_f = reinterpret_cast<T*>(args_ptrs.dst_ptr);
