@@ -57,6 +57,7 @@ struct ActivationPostOp {
         erf,
         soft_sign,
         log,
+        log1p,
     };
 
     ActivationPostOp(const Type type,

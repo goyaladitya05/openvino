@@ -48,6 +48,7 @@ EltwiseKind getEltwiseKind(const Algorithm alg) {
     case Algorithm::EltwiseErf:
     case Algorithm::EltwiseSoftSign:
     case Algorithm::EltwiseLog:
+    case Algorithm::EltwiseLog1p:
         return EltwiseKind::Activation;
     // ScaleShift algorithms
     case Algorithm::EltwiseAdd:
@@ -208,6 +209,8 @@ ActivationPostOp::Type convertToActivationPostOpt(const Algorithm alg) {
         return ActivationPostOp::Type::soft_sign;
     case Algorithm::EltwiseLog:
         return ActivationPostOp::Type::log;
+    case Algorithm::EltwiseLog1p:
+        return ActivationPostOp::Type::log1p;
     default:
         OPENVINO_THROW("Unexpected eltwise algorithm: ", algToString(alg));
     }
@@ -276,6 +279,8 @@ Algorithm convertToEltwiseAlgorithm(const ActivationPostOp::Type type) {
         return Algorithm::EltwiseSoftSign;
     case ActivationPostOp::Type::log:
         return Algorithm::EltwiseLog;
+    case ActivationPostOp::Type::log1p:
+        return Algorithm::EltwiseLog1p;
     default:
         OPENVINO_THROW("Unsupported ActivationPostOp::Type");
     }
