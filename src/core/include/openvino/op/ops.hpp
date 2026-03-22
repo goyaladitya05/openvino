@@ -103,6 +103,7 @@
 #include "openvino/op/less.hpp"
 #include "openvino/op/less_eq.hpp"
 #include "openvino/op/log.hpp"
+#include "openvino/op/log1p.hpp"
 #include "openvino/op/log_softmax.hpp"
 #include "openvino/op/logical_and.hpp"
 #include "openvino/op/logical_not.hpp"

@@ -287,6 +287,7 @@ class StringTensorUnpack;
 namespace ov::op::v16 {
 class ISTFT;
 class Identity;
+class Log1p;
 class SegmentMax;
 class SparseFillEmptyRows;
 }  // namespace ov::op::v16
