@@ -212,6 +212,7 @@ enum class Algorithm : uint8_t {
     EltwiseErf,
     EltwiseSoftSign,
     EltwiseLog,
+    EltwiseLog1p,
     EltwiseBitwiseAnd,
     EltwiseBitwiseNot,
     EltwiseBitwiseOr,

@@ -470,6 +470,7 @@ std::string algToString(const Algorithm alg) {
         CASE(EltwiseErf);
         CASE(EltwiseSoftSign);
         CASE(EltwiseLog);
+        CASE(EltwiseLog1p);
         CASE(EltwiseBitwiseAnd);
         CASE(EltwiseBitwiseNot);
         CASE(EltwiseBitwiseOr);
