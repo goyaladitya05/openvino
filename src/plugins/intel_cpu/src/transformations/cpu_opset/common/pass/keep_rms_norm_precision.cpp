@@ -4,6 +4,7 @@
 #include "keep_rms_norm_precision.hpp"
 
 #include <memory>
+#include <optional>
 
 #include "openvino/core/rt_info.hpp"
 #include "openvino/op/add.hpp"
