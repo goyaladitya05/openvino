@@ -61,6 +61,7 @@
 #ifndef CPU_DEBUG_CAPS
 #    include <ostream>
 #endif
+#include <iostream>
 
 using namespace dnnl;
 using namespace openvino;
@@ -189,6 +190,21 @@ Node::Node(const std::shared_ptr<ov::Node>& op, GraphContext::CPtr ctx, const Sh
     }
     if (is_conversion_disabled(op, element::f16)) {
         keepOriginalPrecision = true;
+    }
+    // DIAG: trace keepOriginalPrecision for RMSNorm chain nodes
+    {
+        const auto& n = op->get_friendly_name();
+        if (n.find("norm") != std::string::npos &&
+            (op->get_type_name() == std::string("Multiply") ||
+             op->get_type_name() == std::string("Sqrt") ||
+             op->get_type_name() == std::string("Divide"))) {
+            std::cerr << "[NODE-CTOR] " << n
+                      << " type=" << op->get_type_name()
+                      << " is_disabled=" << ov::is_conversion_disabled(op, ov::element::f16)
+                      << " keepOrig=" << keepOriginalPrecision
+                      << " outType=" << op->get_output_element_type(0)
+                      << "\n";
+        }
     }
 }
 
