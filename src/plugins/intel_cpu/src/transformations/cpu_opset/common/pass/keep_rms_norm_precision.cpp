@@ -3,6 +3,8 @@
 
 #include "keep_rms_norm_precision.hpp"
 
+#include <algorithm>
+#include <iostream>
 #include <memory>
 #include <optional>
 
@@ -35,6 +37,19 @@ static std::optional<float> scalar_float(const std::shared_ptr<ov::Node>& node) 
     return c->cast_vector<float>()[0];
 }
 
+// Returns true if node is a Constant whose every element equals `val`.
+static bool is_all_value(const std::shared_ptr<ov::Node>& node, float val) {
+    auto c = ov::as_type_ptr<ov::op::v0::Constant>(node);
+    if (!c)
+        return false;
+    if (ov::shape_size(c->get_shape()) == 0)
+        return false;
+    auto vals = c->cast_vector<float>();
+    return std::all_of(vals.begin(), vals.end(), [val](float v) {
+        return v == val;
+    });
+}
+
 static void mark_f32(const std::shared_ptr<ov::Node>& node) {
     if (!ov::is_conversion_disabled(node, ov::element::f16))
         ov::disable_conversion(node, ov::element::f16);
@@ -42,6 +57,7 @@ static void mark_f32(const std::shared_ptr<ov::Node>& node) {
 
 bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model) {
     bool changed = false;
+    int matched = 0;
 
     for (const auto& node : model->get_ordered_ops()) {
         // Anchor: ReduceMean whose input is Power(x, 2.0f)
@@ -50,56 +66,90 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
             continue;
 
         auto power_sq = ov::as_type_ptr<ov::op::v1::Power>(reduce_mean->get_input_node_shared_ptr(0));
-        if (!power_sq)
+        if (!power_sq) {
+            std::cerr << "[KeepRMSNormPrecision] ReduceMean " << reduce_mean->get_friendly_name()
+                      << ": input is not Power\n";
             continue;
+        }
 
         auto exp_val = scalar_float(power_sq->get_input_node_shared_ptr(1));
-        if (!exp_val || *exp_val != 2.0f)
+        if (!exp_val || *exp_val != 2.0f) {
+            std::cerr << "[KeepRMSNormPrecision] Power " << power_sq->get_friendly_name()
+                      << ": exponent not 2.0 (got "
+                      << (exp_val ? std::to_string(*exp_val) : "nullopt") << ")\n";
             continue;
+        }
 
         // Add(mean, eps): single consumer of ReduceMean must be Add with a scalar const
         auto add_eps = ov::as_type_ptr<ov::op::v1::Add>(single_consumer(reduce_mean->output(0)));
-        if (!add_eps)
+        if (!add_eps) {
+            std::cerr << "[KeepRMSNormPrecision] ReduceMean " << reduce_mean->get_friendly_name()
+                      << ": consumer is not Add (or has multiple consumers)\n";
             continue;
+        }
         bool has_eps_const = scalar_float(add_eps->get_input_node_shared_ptr(0)).has_value() ||
                              scalar_float(add_eps->get_input_node_shared_ptr(1)).has_value();
-        if (!has_eps_const)
+        if (!has_eps_const) {
+            std::cerr << "[KeepRMSNormPrecision] Add " << add_eps->get_friendly_name()
+                      << ": no scalar epsilon constant found\n";
             continue;
+        }
 
         auto after_add = single_consumer(add_eps->output(0));
-        if (!after_add)
+        if (!after_add) {
+            std::cerr << "[KeepRMSNormPrecision] Add " << add_eps->get_friendly_name()
+                      << ": output has multiple consumers\n";
             continue;
+        }
 
         std::shared_ptr<ov::Node> rsqrt_node;
 
         if (auto sqrt_node = ov::as_type_ptr<ov::op::v0::Sqrt>(after_add)) {
             auto sqrt_consumer = single_consumer(sqrt_node->output(0));
-            if (!sqrt_consumer)
+            if (!sqrt_consumer) {
+                std::cerr << "[KeepRMSNormPrecision] Sqrt " << sqrt_node->get_friendly_name()
+                          << ": output has multiple consumers\n";
                 continue;
+            }
             if (auto inv = ov::as_type_ptr<ov::op::v1::Power>(sqrt_consumer)) {
                 // (a1) Standard: Sqrt → Power(sqrt, -1)
                 auto inv_exp = scalar_float(inv->get_input_node_shared_ptr(1));
-                if (!inv_exp || *inv_exp != -1.0f)
+                if (!inv_exp || *inv_exp != -1.0f) {
+                    std::cerr << "[KeepRMSNormPrecision] Power(sqrt,?) " << inv->get_friendly_name()
+                              << ": exponent not -1.0\n";
                     continue;
+                }
                 mark_f32(sqrt_node);
                 rsqrt_node = inv;
             } else if (auto div = ov::as_type_ptr<ov::op::v1::Divide>(sqrt_consumer)) {
-                // (a2) aten::rsqrt → Divide(Constant(1), Sqrt): numerator must be 1
-                auto num = scalar_float(div->get_input_node_shared_ptr(0));
-                if (!num || *num != 1.0f)
+                // (a2) aten::rsqrt → Divide(Constant(1), Sqrt): numerator must be all-ones
+                // Note: use is_all_value instead of scalar_float to handle non-scalar broadcast constants.
+                if (!is_all_value(div->get_input_node_shared_ptr(0), 1.0f)) {
+                    std::cerr << "[KeepRMSNormPrecision] Divide " << div->get_friendly_name()
+                              << ": numerator (port 0) is not all-ones constant; type="
+                              << div->get_input_node_shared_ptr(0)->get_type_info().name << "\n";
                     continue;
+                }
                 mark_f32(sqrt_node);
                 rsqrt_node = div;
             } else {
+                std::cerr << "[KeepRMSNormPrecision] Sqrt " << sqrt_node->get_friendly_name()
+                          << ": consumer is neither Power nor Divide but "
+                          << sqrt_consumer->get_type_info().name << "\n";
                 continue;
             }
         } else if (auto fused = ov::as_type_ptr<ov::op::v1::Power>(after_add)) {
             // (b) Fused: Power(add_eps, -0.5)
             auto fused_exp = scalar_float(fused->get_input_node_shared_ptr(1));
-            if (!fused_exp || *fused_exp != -0.5f)
+            if (!fused_exp || *fused_exp != -0.5f) {
+                std::cerr << "[KeepRMSNormPrecision] Power(add_eps,?) " << fused->get_friendly_name()
+                          << ": exponent not -0.5\n";
                 continue;
+            }
             rsqrt_node = fused;
         } else {
+            std::cerr << "[KeepRMSNormPrecision] after_add " << after_add->get_friendly_name()
+                      << ": is neither Sqrt nor Power but " << after_add->get_type_info().name << "\n";
             continue;
         }
 
@@ -107,8 +157,11 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         // type-normalizing Convert(f32→bf16/f16) that OV's PyTorch FE inserts to
         // unify mixed-dtype operands (PyTorch promotes bf16*f32→f32; OV IR does not).
         auto rsqrt_consumer = single_consumer(rsqrt_node->output(0));
-        if (!rsqrt_consumer)
+        if (!rsqrt_consumer) {
+            std::cerr << "[KeepRMSNormPrecision] rsqrt " << rsqrt_node->get_friendly_name()
+                      << ": output has multiple consumers\n";
             continue;
+        }
 
         std::shared_ptr<ov::op::v0::Convert> type_norm_convert;
         if (auto cv = ov::as_type_ptr<ov::op::v0::Convert>(rsqrt_consumer)) {
@@ -116,14 +169,20 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
             if (out_type == ov::element::bf16 || out_type == ov::element::f16) {
                 type_norm_convert = cv;
                 rsqrt_consumer = single_consumer(cv->output(0));
-                if (!rsqrt_consumer)
+                if (!rsqrt_consumer) {
+                    std::cerr << "[KeepRMSNormPrecision] type-norm Convert " << cv->get_friendly_name()
+                              << ": output has multiple consumers\n";
                     continue;
+                }
             }
         }
 
         auto mul_norm = ov::as_type_ptr<ov::op::v1::Multiply>(rsqrt_consumer);
-        if (!mul_norm)
+        if (!mul_norm) {
+            std::cerr << "[KeepRMSNormPrecision] rsqrt consumer " << rsqrt_consumer->get_friendly_name()
+                      << ": is not Multiply but " << rsqrt_consumer->get_type_info().name << "\n";
             continue;
+        }
 
         // Determine which Multiply port carries the rsqrt chain vs. hidden_states.
         std::shared_ptr<ov::Node> rsqrt_chain_end =
@@ -133,8 +192,11 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
             if (mul_norm->get_input_node_shared_ptr(p) == rsqrt_chain_end)
                 rsqrt_port = p;
         }
-        if (rsqrt_port == -1)
+        if (rsqrt_port == -1) {
+            std::cerr << "[KeepRMSNormPrecision] Multiply " << mul_norm->get_friendly_name()
+                      << ": rsqrt chain end not found in inputs (ptr mismatch?)\n";
             continue;
+        }
         const int hidden_port = 1 - rsqrt_port;
 
         // Mark variance chain nodes f32 (variance, eps, sqrt, rsqrt stay f32).
@@ -165,9 +227,15 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         mul_norm->validate_and_infer_types();  // output type is now f32
         mark_f32(mul_norm);
         changed = true;
+        ++matched;
+        std::cerr << "[KeepRMSNormPrecision] matched chain #" << matched
+                  << " at Multiply " << mul_norm->get_friendly_name() << "\n";
     }
 
+    std::cerr << "[KeepRMSNormPrecision] total matched chains: " << matched << "\n";
     return changed;
 }
+
+}  // namespace ov::intel_cpu
 
 }  // namespace ov::intel_cpu
