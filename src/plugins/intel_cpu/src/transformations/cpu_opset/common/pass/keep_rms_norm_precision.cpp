@@ -9,6 +9,7 @@
 #include "openvino/core/rt_info.hpp"
 #include "openvino/op/add.hpp"
 #include "openvino/op/constant.hpp"
+#include "openvino/op/convert.hpp"
 #include "openvino/op/divide.hpp"
 #include "openvino/op/multiply.hpp"
 #include "openvino/op/power.hpp"
@@ -18,7 +19,6 @@
 
 namespace ov::intel_cpu {
 
-// Returns the single consumer of `output`, or nullptr if there are zero or more than one.
 static std::shared_ptr<ov::Node> single_consumer(const ov::Output<ov::Node>& output) {
     const auto& targets = output.get_target_inputs();
     if (targets.size() != 1)
@@ -26,7 +26,6 @@ static std::shared_ptr<ov::Node> single_consumer(const ov::Output<ov::Node>& out
     return targets.begin()->get_node()->shared_from_this();
 }
 
-// Returns the scalar float value of a Constant node, or nullopt.
 static std::optional<float> scalar_float(const std::shared_ptr<ov::Node>& node) {
     auto c = ov::as_type_ptr<ov::op::v0::Constant>(node);
     if (!c)
@@ -58,21 +57,15 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         if (!exp_val || *exp_val != 2.0f)
             continue;
 
-        // ------- confirmed: mean(x^2) pattern -------
-
-        // Add(mean, eps): the only consumer of ReduceMean must be Add with a scalar const
+        // Add(mean, eps): single consumer of ReduceMean must be Add with a scalar const
         auto add_eps = ov::as_type_ptr<ov::op::v1::Add>(single_consumer(reduce_mean->output(0)));
         if (!add_eps)
             continue;
-
         bool has_eps_const = scalar_float(add_eps->get_input_node_shared_ptr(0)).has_value() ||
                              scalar_float(add_eps->get_input_node_shared_ptr(1)).has_value();
         if (!has_eps_const)
             continue;
 
-        // Next consumer of Add can be either:
-        //   (a) Sqrt → Power(sqrt, -1)       — standard two-step rsqrt
-        //   (b) Power(add_eps, -0.5)          — fused sqrt+rsqrt shortcut
         auto after_add = single_consumer(add_eps->output(0));
         if (!after_add)
             continue;
@@ -91,7 +84,7 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
                 mark_f32(sqrt_node);
                 rsqrt_node = inv;
             } else if (auto div = ov::as_type_ptr<ov::op::v1::Divide>(sqrt_consumer)) {
-                // (a2) aten::rsqrt → Divide(Constant(1), Sqrt): numerator is Constant(1)
+                // (a2) aten::rsqrt → Divide(Constant(1), Sqrt): numerator must be 1
                 auto num = scalar_float(div->get_input_node_shared_ptr(0));
                 if (!num || *num != 1.0f)
                     continue;
@@ -110,17 +103,66 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
             continue;
         }
 
-        // Normalize: the single consumer of rsqrt_node must be Multiply(x, rsqrt) or Multiply(rsqrt, x)
-        auto mul_norm = ov::as_type_ptr<ov::op::v1::Multiply>(single_consumer(rsqrt_node->output(0)));
+        // Find the normalize Multiply, possibly separated from rsqrt_node by a
+        // type-normalizing Convert(f32→bf16/f16) that OV's PyTorch FE inserts to
+        // unify mixed-dtype operands (PyTorch promotes bf16*f32→f32; OV IR does not).
+        auto rsqrt_consumer = single_consumer(rsqrt_node->output(0));
+        if (!rsqrt_consumer)
+            continue;
+
+        std::shared_ptr<ov::op::v0::Convert> type_norm_convert;
+        if (auto cv = ov::as_type_ptr<ov::op::v0::Convert>(rsqrt_consumer)) {
+            auto out_type = cv->get_output_element_type(0);
+            if (out_type == ov::element::bf16 || out_type == ov::element::f16) {
+                type_norm_convert = cv;
+                rsqrt_consumer = single_consumer(cv->output(0));
+                if (!rsqrt_consumer)
+                    continue;
+            }
+        }
+
+        auto mul_norm = ov::as_type_ptr<ov::op::v1::Multiply>(rsqrt_consumer);
         if (!mul_norm)
             continue;
 
-        // All nodes identified — mark the entire chain f32.
+        // Determine which Multiply port carries the rsqrt chain vs. hidden_states.
+        std::shared_ptr<ov::Node> rsqrt_chain_end =
+            type_norm_convert ? std::static_pointer_cast<ov::Node>(type_norm_convert) : rsqrt_node;
+        int rsqrt_port = -1;
+        for (int p = 0; p < 2; ++p) {
+            if (mul_norm->get_input_node_shared_ptr(p) == rsqrt_chain_end)
+                rsqrt_port = p;
+        }
+        if (rsqrt_port == -1)
+            continue;
+        const int hidden_port = 1 - rsqrt_port;
+
+        // Mark variance chain nodes f32 (variance, eps, sqrt, rsqrt stay f32).
         mark_f32(power_sq);
         mark_f32(reduce_mean);
         mark_f32(add_eps);
-        mark_f32(after_add);  // Sqrt or fused Power(-0.5)
+        mark_f32(after_add);
         mark_f32(rsqrt_node);
+
+        // Force the normalize Multiply to compute in f32, matching PyTorch's type-promotion
+        // semantics where bf16 * f32 → f32 (Diffusers RMSNorm relies on this).
+        //
+        // OV's PyTorch FE inserts Convert(f32→bf16) on the rsqrt path, producing
+        // Multiply(bf16, bf16) → bf16 in the IR.  We fix this by:
+        //   1. Bypassing that Convert so rsqrt_node's f32 output goes directly to the Multiply.
+        //   2. Inserting Convert(bf16→f32) on the hidden_states input.
+        // Result: Multiply(f32, f32) → f32, whose output is then Reorder'd to bf16 by
+        // EnforceInferencePrecision for all downstream mandatory-bf16 ops.
+        if (type_norm_convert) {
+            mul_norm->input(rsqrt_port).replace_source_output(rsqrt_node->output(0));
+        }
+        auto hidden_input = mul_norm->input_value(hidden_port);
+        if (hidden_input.get_element_type() != ov::element::f32) {
+            auto upcast = std::make_shared<ov::op::v0::Convert>(hidden_input, ov::element::f32);
+            upcast->validate_and_infer_types();
+            mul_norm->input(hidden_port).replace_source_output(upcast->output(0));
+        }
+        mul_norm->validate_and_infer_types();  // output type is now f32
         mark_f32(mul_norm);
         changed = true;
     }
