@@ -9,6 +9,7 @@
 #include "openvino/core/rt_info.hpp"
 #include "openvino/op/add.hpp"
 #include "openvino/op/constant.hpp"
+#include "openvino/op/divide.hpp"
 #include "openvino/op/multiply.hpp"
 #include "openvino/op/power.hpp"
 #include "openvino/op/reduce_mean.hpp"
@@ -79,15 +80,26 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         std::shared_ptr<ov::Node> rsqrt_node;
 
         if (auto sqrt_node = ov::as_type_ptr<ov::op::v0::Sqrt>(after_add)) {
-            // (a) Standard: Sqrt → Power(sqrt, -1)
-            auto inv = ov::as_type_ptr<ov::op::v1::Power>(single_consumer(sqrt_node->output(0)));
-            if (!inv)
+            auto sqrt_consumer = single_consumer(sqrt_node->output(0));
+            if (!sqrt_consumer)
                 continue;
-            auto inv_exp = scalar_float(inv->get_input_node_shared_ptr(1));
-            if (!inv_exp || *inv_exp != -1.0f)
+            if (auto inv = ov::as_type_ptr<ov::op::v1::Power>(sqrt_consumer)) {
+                // (a1) Standard: Sqrt → Power(sqrt, -1)
+                auto inv_exp = scalar_float(inv->get_input_node_shared_ptr(1));
+                if (!inv_exp || *inv_exp != -1.0f)
+                    continue;
+                mark_f32(sqrt_node);
+                rsqrt_node = inv;
+            } else if (auto div = ov::as_type_ptr<ov::op::v1::Divide>(sqrt_consumer)) {
+                // (a2) aten::rsqrt → Divide(Constant(1), Sqrt): numerator is Constant(1)
+                auto num = scalar_float(div->get_input_node_shared_ptr(0));
+                if (!num || *num != 1.0f)
+                    continue;
+                mark_f32(sqrt_node);
+                rsqrt_node = div;
+            } else {
                 continue;
-            mark_f32(sqrt_node);
-            rsqrt_node = inv;
+            }
         } else if (auto fused = ov::as_type_ptr<ov::op::v1::Power>(after_add)) {
             // (b) Fused: Power(add_eps, -0.5)
             auto fused_exp = scalar_float(fused->get_input_node_shared_ptr(1));
