@@ -17,6 +17,7 @@
 #include "openvino/op/power.hpp"
 #include "openvino/op/reduce_mean.hpp"
 #include "openvino/op/sqrt.hpp"
+#include "snippets/pass/tokenization.hpp"
 #include "transformations/rt_info/disable_precision_conversion.hpp"
 
 namespace ov::intel_cpu {
@@ -217,6 +218,7 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         // EnforceInferencePrecision for all downstream mandatory-bf16 ops.
         if (type_norm_convert) {
             mul_norm->input(rsqrt_port).replace_source_output(rsqrt_node->output(0));
+            snippets::pass::SetSnippetsNodeType(type_norm_convert, snippets::pass::SnippetsNodeType::SkippedByPlugin);
         }
         auto hidden_input = mul_norm->input_value(hidden_port);
         if (hidden_input.get_element_type() != ov::element::f32) {
@@ -226,6 +228,9 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         }
         mul_norm->validate_and_infer_types();  // output type is now f32
         mark_f32(mul_norm);
+        // Prevent Snippets from fusing [Convert(bf16→f32), Multiply, Convert(f32→bf16)] into a
+        // Subgraph that runs in bf16 externally, which would override our f32 precision marking.
+        snippets::pass::SetSnippetsNodeType(mul_norm, snippets::pass::SnippetsNodeType::SkippedByPlugin);
         changed = true;
         ++matched;
         std::cerr << "[KeepRMSNormPrecision] matched chain #" << matched
