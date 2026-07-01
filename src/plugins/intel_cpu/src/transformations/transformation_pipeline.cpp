@@ -207,6 +207,7 @@
 #    include "transformations/cpu_opset/common/pass/causal_mask_preprocess_fusion.hpp"
 #    include "transformations/cpu_opset/common/pass/convert_fq_rnn_to_quantized_rnn.hpp"
 #    include "transformations/cpu_opset/common/pass/decompose_rms_norm.hpp"
+#    include "transformations/cpu_opset/common/pass/keep_rms_norm_precision.hpp"
 #    include "transformations/cpu_opset/x64/pass/convert_to_interaction.hpp"
 #    include "transformations/cpu_opset/x64/pass/mlp_fusion.hpp"
 #    include "transformations/cpu_opset/x64/pass/qkv_proj_fusion.hpp"
@@ -1186,6 +1187,15 @@ void Transformations::PostLpt() {
             return node::RMSNorm::isSupportedOperation(node, errorMsg);
         },
         ov::intel_cpu::DecomposeRMSNorm);
+
+    // Under bf16/f16, keep decomposed RMSNorm chains (affine-free norms that RMSFusion
+    // cannot fuse) in f32.  Must run after RMSFusion so that fused norms (norm_q/k) are
+    // already consumed and won't be double-marked.  Must run before CpuSpecificOpSet
+    // (ConvertToPowerStatic), which is why convert_to_power_static.cpp re-applies the
+    // disable_conversion attribute that copy_runtime_info would otherwise drop.
+    if (any_of(config.inferencePrecision, ov::element::bf16, ov::element::f16)) {
+        CPU_REGISTER_PASS_X64(postLPTPassManager, ov::intel_cpu::KeepRMSNormPrecision);
+    }
 
     // markup Rope Input when BF16/F16 inference.
     if (any_of(config.inferencePrecision, ov::element::bf16, ov::element::f16)) {

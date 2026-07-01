@@ -36,6 +36,7 @@
 #include "ov_ops/fully_connected.hpp"
 #include "transformations/cpu_opset/common/op/power_static.hpp"
 #include "transformations/rt_info/dequantization_node.hpp"
+#include "transformations/rt_info/disable_precision_conversion.hpp"
 #include "utils/general_utils.h"
 
 namespace {
@@ -184,6 +185,10 @@ ov::intel_cpu::ConvertToPowerStatic::ConvertToPowerStatic() {
         }
         toReplace->set_friendly_name(node->get_friendly_name());
         ov::copy_runtime_info(node, toReplace);
+        // DisablePrecisionConversion::is_copyable() == false, so copy_runtime_info drops it.
+        // Re-apply explicitly so that KeepRMSNormPrecision markings survive this replacement.
+        if (ov::is_conversion_disabled(node, ov::element::f16))
+            ov::disable_conversion(toReplace, ov::element::f16);
         ov::replace_node(node, toReplace);
         return true;
     };
