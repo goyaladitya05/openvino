@@ -229,7 +229,13 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         changed = true;
         ++matched;
         std::cerr << "[KeepRMSNormPrecision] matched chain #" << matched
-                  << " at Multiply " << mul_norm->get_friendly_name() << "\n";
+                  << " at Multiply " << mul_norm->get_friendly_name()
+                  << " | out_type=" << mul_norm->get_output_element_type(0)
+                  << " in0_type=" << mul_norm->get_input_element_type(0)
+                  << " in1_type=" << mul_norm->get_input_element_type(1)
+                  << " is_disabled=" << ov::is_conversion_disabled(mul_norm, ov::element::f16)
+                  << " type_norm_convert=" << (type_norm_convert ? type_norm_convert->get_friendly_name() : "none")
+                  << "\n";
     }
 
     std::cerr << "[KeepRMSNormPrecision] total matched chains: " << matched << "\n";
