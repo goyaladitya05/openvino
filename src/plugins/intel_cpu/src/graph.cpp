@@ -73,6 +73,7 @@
 #include "utils/general_utils.h"
 #include "utils/node_dumper.h"
 #include "utils/verbose.h"
+#include <iostream>
 #include "weights_cache.hpp"
 #ifdef CPU_DEBUG_CAPS
 #    include "openvino/core/partial_shape.hpp"
@@ -416,6 +417,23 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
     InitNodes();
 
     ov::intel_cpu::GraphOptimizer::ApplyCommonGraphOptimizations(*this);
+
+    // DIAG: check norm Eltwise precisions after GraphOptimizer, before InitDescriptors
+    for (const auto& n : graphNodes) {
+        if (n->getType() == Type::Eltwise && n->getName().find("norm") != std::string::npos) {
+            std::string in0 = n->getOriginalInputsNumber() > 0
+                                  ? n->getOriginalInputPrecisionAtPort(0).to_string()
+                                  : "?";
+            std::string in1 = n->getOriginalInputsNumber() > 1
+                                  ? n->getOriginalInputPrecisionAtPort(1).to_string()
+                                  : "-";
+            std::cerr << "[GRAPHOPT] " << n->getName()
+                      << " keepOrig=" << n->keepOrigPrecision()
+                      << " in0=" << in0 << " in1=" << in1
+                      << " out=" << n->getOriginalOutputPrecisionAtPort(0).to_string()
+                      << "\n";
+        }
+    }
 
     SortTopologically();
 
