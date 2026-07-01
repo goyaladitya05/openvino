@@ -237,5 +237,3 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
 }
 
 }  // namespace ov::intel_cpu
-
-}  // namespace ov::intel_cpu
