@@ -418,21 +418,28 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
 
     ov::intel_cpu::GraphOptimizer::ApplyCommonGraphOptimizations(*this);
 
-    // DIAG: check norm Eltwise precisions after GraphOptimizer, before InitDescriptors
-    for (const auto& n : graphNodes) {
-        if (n->getType() == Type::Eltwise && n->getName().find("norm") != std::string::npos) {
-            std::string in0 = n->getOriginalInputsNumber() > 0
-                                  ? n->getOriginalInputPrecisionAtPort(0).to_string()
-                                  : "?";
-            std::string in1 = n->getOriginalInputsNumber() > 1
-                                  ? n->getOriginalInputPrecisionAtPort(1).to_string()
-                                  : "-";
-            std::cerr << "[GRAPHOPT] " << n->getName()
-                      << " keepOrig=" << n->keepOrigPrecision()
-                      << " in0=" << in0 << " in1=" << in1
-                      << " out=" << n->getOriginalOutputPrecisionAtPort(0).to_string()
-                      << "\n";
+    // DIAG: check norm node precisions after GraphOptimizer, before InitDescriptors
+    {
+        int norm_count = 0;
+        for (const auto& n : graphNodes) {
+            if (n->getName().find("norm") != std::string::npos) {
+                ++norm_count;
+                std::string in0 = n->getOriginalInputsNumber() > 0
+                                      ? n->getOriginalInputPrecisionAtPort(0).to_string()
+                                      : "?";
+                std::string in1 = n->getOriginalInputsNumber() > 1
+                                      ? n->getOriginalInputPrecisionAtPort(1).to_string()
+                                      : "-";
+                std::cerr << "[GRAPHOPT] " << n->getName()
+                          << " type=" << n->getTypeStr()
+                          << " keepOrig=" << n->keepOrigPrecision()
+                          << " in0=" << in0 << " in1=" << in1
+                          << " out=" << n->getOriginalOutputPrecisionAtPort(0).to_string()
+                          << "\n";
+            }
         }
+        std::cerr << "[GRAPHOPT-TOTAL] norm nodes=" << norm_count
+                  << " all=" << graphNodes.size() << "\n";
     }
 
     SortTopologically();
