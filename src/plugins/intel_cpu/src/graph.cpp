@@ -461,9 +461,15 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
                 }
                 const auto& inConfs = pd->getConfig().inConfs;
                 const auto& outConfs = pd->getConfig().outConfs;
+                std::string ins;
+                for (size_t i = 0; i < inConfs.size() && i < 4; ++i) {
+                    if (i) ins += ",";
+                    ins += "in" + std::to_string(i) + "=";
+                    ins += inConfs[i].getMemDesc()->getPrecision().to_string();
+                }
                 std::cerr << "[SELPREC] " << n->getName()
                           << " type=" << n->getTypeStr()
-                          << " in0=" << (inConfs.empty() ? "?" : inConfs[0].getMemDesc()->getPrecision().to_string())
+                          << " " << ins
                           << " out=" << (outConfs.empty() ? "?" : outConfs[0].getMemDesc()->getPrecision().to_string())
                           << "\n";
             }
