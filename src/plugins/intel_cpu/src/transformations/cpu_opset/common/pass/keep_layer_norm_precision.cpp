@@ -35,6 +35,16 @@ bool KeepLayerNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& mode
         if (!is_mvn)
             continue;
 
+        // Diagnose why MVN chains are or aren't matched.
+        {
+            const size_t nc = node->output(0).get_target_inputs().size();
+            auto consumer = single_consumer_ln(node->output(0));
+            std::cerr << "[KLN-DIAG] MVN=" << node->get_friendly_name()
+                      << " consumers=" << nc
+                      << " consumer_type=" << (consumer ? consumer->get_type_name() : "(multi/none)")
+                      << "\n";
+        }
+
         // MVN must feed a single Multiply (gamma scaling: output * gamma).
         auto mul = ov::as_type_ptr<ov::op::v1::Multiply>(single_consumer_ln(node->output(0)));
         if (!mul)
