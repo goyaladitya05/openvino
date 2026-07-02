@@ -450,13 +450,15 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
 
     InitOptimalPrimitiveDescriptors();
 
-    // DIAG: selected descriptor precision for norm/SDPA/Subgraph nodes
+    // DIAG: selected descriptor precision for KRP-marked / Subgraph / SDPA nodes
     {
         for (const auto& n : graphNodes) {
-            const bool isNormNode = n->getName().find("norm") != std::string::npos;
+            // keepOrigPrecision()==true means KRP (or similar pass) set disable_conversion(f16).
+            // Also capture Snippets subgraphs and SDPA nodes unconditionally.
+            const bool isKrpMarked  = n->keepOrigPrecision();
             const bool isSubgraphNode = n->getTypeStr() == "Subgraph";
             const bool isSdpaNode = n->getTypeStr() == "ScaledDotProductAttention";
-            if (!isNormNode && !isSubgraphNode && !isSdpaNode)
+            if (!isKrpMarked && !isSubgraphNode && !isSdpaNode)
                 continue;
             const auto* pd = n->getSelectedPrimitiveDescriptor();
             if (!pd) {
