@@ -112,7 +112,7 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
                 mark_f32(sqrt_node);
                 rsqrt_node = div;
             } else {
-                skip(("Sqrt consumer is " + sqrt_consumer->get_type_name()).c_str()); continue;
+                skip((std::string("Sqrt consumer is ") + sqrt_consumer->get_type_name()).c_str()); continue;
             }
         } else if (auto fused = ov::as_type_ptr<ov::op::v1::Power>(after_add)) {
             // (b) Fused: Power(add_eps, -0.5)
@@ -120,7 +120,7 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
             if (!fused_exp || *fused_exp != -0.5f) { skip("Power after Add exp != -0.5"); continue; }
             rsqrt_node = fused;
         } else {
-            skip(("after_add consumer is " + after_add->get_type_name()).c_str()); continue;
+            skip((std::string("after_add consumer is ") + after_add->get_type_name()).c_str()); continue;
         }
 
         // Find the normalize Multiply, possibly separated from rsqrt_node by a
@@ -140,7 +140,7 @@ bool KeepRMSNormPrecision::run_on_model(const std::shared_ptr<ov::Model>& model)
         }
 
         auto mul_norm = ov::as_type_ptr<ov::op::v1::Multiply>(rsqrt_consumer);
-        if (!mul_norm) { skip(("rsqrt consumer is " + rsqrt_consumer->get_type_name()).c_str()); continue; }
+        if (!mul_norm) { skip((std::string("rsqrt consumer is ") + rsqrt_consumer->get_type_name()).c_str()); continue; }
 
         // Determine which Multiply port carries the rsqrt chain vs. hidden_states.
         std::shared_ptr<ov::Node> rsqrt_chain_end =
