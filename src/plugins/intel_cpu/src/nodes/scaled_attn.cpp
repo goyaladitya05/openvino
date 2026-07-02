@@ -1911,6 +1911,9 @@ void ScaledDotProductAttention::initSupportedPrimitiveDescriptors() {
         return;
     }
     auto rtPrecision = getRuntimePrecision();
+    std::cerr << "[SDPA-PREC] " << getName()
+              << " origInPrec=" << getOriginalInputPrecisionAtPort(0).to_string()
+              << " rtPrec=" << rtPrecision.to_string() << "\n";
     auto orginSDPInputNumber = getOriginalInputsNumber() - (m_config.config.fuse_concat ? 3 : 0);
 
     NodeConfig config;

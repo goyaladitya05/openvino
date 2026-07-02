@@ -450,29 +450,35 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
 
     InitOptimalPrimitiveDescriptors();
 
-    // DIAG: selected descriptor precision for norm nodes (after InitOptimalPrimitiveDescriptors)
+    // DIAG: selected descriptor precision for norm/SDPA/Subgraph nodes
     {
         for (const auto& n : graphNodes) {
-            if (n->getName().find("norm") != std::string::npos) {
-                const auto* pd = n->getSelectedPrimitiveDescriptor();
-                if (!pd) {
-                    std::cerr << "[SELPREC] " << n->getName() << " type=" << n->getTypeStr() << " NO_PD\n";
-                    continue;
-                }
-                const auto& inConfs = pd->getConfig().inConfs;
-                const auto& outConfs = pd->getConfig().outConfs;
-                std::string ins;
-                for (size_t i = 0; i < inConfs.size() && i < 4; ++i) {
-                    if (i) ins += ",";
-                    ins += "in" + std::to_string(i) + "=";
-                    ins += inConfs[i].getMemDesc()->getPrecision().to_string();
-                }
-                std::cerr << "[SELPREC] " << n->getName()
-                          << " type=" << n->getTypeStr()
-                          << " " << ins
-                          << " out=" << (outConfs.empty() ? "?" : outConfs[0].getMemDesc()->getPrecision().to_string())
-                          << "\n";
+            const bool isNormNode = n->getName().find("norm") != std::string::npos;
+            const bool isSubgraphNode = n->getTypeStr() == "Subgraph";
+            const bool isSdpaNode = n->getTypeStr() == "ScaledDotProductAttention";
+            if (!isNormNode && !isSubgraphNode && !isSdpaNode)
+                continue;
+            const auto* pd = n->getSelectedPrimitiveDescriptor();
+            if (!pd) {
+                std::cerr << "[SELPREC] " << n->getName() << " type=" << n->getTypeStr() << " NO_PD\n";
+                continue;
             }
+            const auto& inConfs = pd->getConfig().inConfs;
+            const auto& outConfs = pd->getConfig().outConfs;
+            std::string ins;
+            for (size_t i = 0; i < inConfs.size() && i < 4; ++i) {
+                if (i) ins += ",";
+                ins += "in" + std::to_string(i) + "=";
+                const auto desc = inConfs[i].getMemDesc();
+                ins += desc ? desc->getPrecision().to_string() : "null";
+            }
+            std::cerr << "[SELPREC] " << n->getName()
+                      << " type=" << n->getTypeStr()
+                      << " edges=" << n->getParentEdges().size()
+                      << " inConfs=" << inConfs.size()
+                      << " " << ins
+                      << " out=" << (outConfs.empty() ? "?" : outConfs[0].getMemDesc()->getPrecision().to_string())
+                      << "\n";
         }
     }
 
