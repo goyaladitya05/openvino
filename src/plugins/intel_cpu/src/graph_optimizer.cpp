@@ -2066,6 +2066,13 @@ void GraphOptimizer::FuseEltwiseAndSimple(Graph& graph) {
         if (parentNode->isConstant() && !childNode->isConstant()) {
             return false;
         }
+        // A node with keepOrigPrecision=true must keep its precision determined by its
+        // own descriptor.  Fusing it as a binary post-op into the parent lets the parent's
+        // execution context (e.g. a bf16 binary src) override the intended f32 output, so
+        // skip this fusion.
+        if (childNode->keepOrigPrecision()) {
+            return false;
+        }
         for (const auto& childParentEdge : childNode->getParentEdges()) {
             // WA to prevent unsupported reorder exception issue in some cases
             if (childParentEdge.lock()->getParent()->getType() == Type::Split) {
