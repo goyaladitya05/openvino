@@ -450,6 +450,26 @@ void Graph::Configure([[maybe_unused]] bool optimize) {
 
     InitOptimalPrimitiveDescriptors();
 
+    // DIAG: selected descriptor precision for norm nodes (after InitOptimalPrimitiveDescriptors)
+    {
+        for (const auto& n : graphNodes) {
+            if (n->getName().find("norm") != std::string::npos) {
+                const auto* pd = n->getSelectedPrimitiveDescriptor();
+                if (!pd) {
+                    std::cerr << "[SELPREC] " << n->getName() << " type=" << n->getTypeStr() << " NO_PD\n";
+                    continue;
+                }
+                const auto& inConfs = pd->getConfig().inConfs;
+                const auto& outConfs = pd->getConfig().outConfs;
+                std::cerr << "[SELPREC] " << n->getName()
+                          << " type=" << n->getTypeStr()
+                          << " in0=" << (inConfs.empty() ? "?" : inConfs[0].getMemDesc()->getPrecision().to_string())
+                          << " out=" << (outConfs.empty() ? "?" : outConfs[0].getMemDesc()->getPrecision().to_string())
+                          << "\n";
+            }
+        }
+    }
+
     ResolveEdgeConflicts();
 
     ov::intel_cpu::GraphOptimizer::ShareReorders(*this);
