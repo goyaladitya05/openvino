@@ -14,7 +14,6 @@
 #include "openvino/op/sqrt.hpp"
 #include "openvino/runtime/system_conf.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
-#include "utils/cpu_test_utils.hpp"
 
 namespace ov::test {
 
@@ -103,7 +102,7 @@ TEST_P(RMSNormNoGammaCPUTest, CompareWithRefs) {
     }
     run();
     // the affine-free norm must be fused into a single RMS node (not left as a decomposed Eltwise chain)
-    CPUTestUtils::CheckNumberOfNodesWithType(compiledModel, "RMS", 1);
+    CheckNumberOfNodesWithType(compiledModel, "RMS", 1);
 }
 
 INSTANTIATE_TEST_SUITE_P(smoke_RMSNormNoGamma_CPU,
