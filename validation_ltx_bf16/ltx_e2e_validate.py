@@ -15,8 +15,6 @@ Usage:
         [--steps 30] [--height 320] [--width 480] [--frames 33] [--seed 42] [--save-videos]
 """
 import argparse
-import json
-import pathlib
 import time
 
 import numpy as np
@@ -24,21 +22,17 @@ import torch
 
 
 def load_pipeline(model_dir: str, precision: str):
-    from optimum.intel import OVLTXPipeline, OVLTXImageToVideoPipeline
+    from optimum.intel import OVLTXPipeline
 
-    idx = json.loads((pathlib.Path(model_dir) / "model_index.json").read_text())
-    is_i2v = "ImageToVideo" in idx.get("_class_name", "")
-    cls = OVLTXImageToVideoPipeline if is_i2v else OVLTXPipeline
-    pipe = cls.from_pretrained(
+    return OVLTXPipeline.from_pretrained(
         model_dir,
         device="CPU",
         ov_config={"INFERENCE_PRECISION_HINT": precision},
     )
-    return pipe, is_i2v
 
 
 def run_once(model_dir: str, precision: str, args) -> dict:
-    pipe, is_i2v = load_pipeline(model_dir, precision)
+    pipe = load_pipeline(model_dir, precision)
 
     latents_per_step = []
 
@@ -60,12 +54,6 @@ def run_once(model_dir: str, precision: str, args) -> dict:
         callback_on_step_end_tensor_inputs=["latents"],
         output_type="np",
     )
-    if is_i2v:
-        from PIL import Image
-
-        rng = np.random.default_rng(0)
-        img = Image.fromarray((rng.random((args.height, args.width, 3)) * 255).astype(np.uint8))
-        call_kwargs["image"] = img
 
     t0 = time.perf_counter()
     result = pipe(**call_kwargs)
