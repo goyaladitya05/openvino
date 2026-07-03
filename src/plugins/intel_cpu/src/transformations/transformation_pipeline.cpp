@@ -1177,7 +1177,15 @@ void Transformations::PostLpt() {
     }
 #endif  // OPENVINO_ARCH_X86_64
 
-    CPU_REGISTER_PASS_X64(postLPTPassManager, ov::pass::RMSFusion, false);
+    // enable_without_gamma covers affine-free RMSNorm (norm_elementwise_affine=false, e.g. DiT/LTX-Video norm1/norm2):
+    // fusing it into internal::RMS keeps the variance reduction in f32 inside the JIT kernel under bf16 enforcement,
+    // otherwise the decomposed Power/ReduceMean/Sqrt chain runs with bf16 intermediates and the error compounds over
+    // diffusion steps. enable_div_x stays off (fails CPU CI PyTorch layer tests, see RMSFusion).
+    CPU_REGISTER_PASS_X64(postLPTPassManager,
+                          ov::pass::RMSFusion,
+                          false /* force_tail_convert */,
+                          false /* enable_div_x */,
+                          true /* enable_without_gamma */);
     CPU_REGISTER_PASS_X64(postLPTPassManager, ov::intel_cpu::DecomposeRMSNorm);
     CPU_SET_CALLBACK_X64(
         postLPTPassManager,

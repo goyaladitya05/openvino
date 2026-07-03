@@ -7,10 +7,10 @@
 #include "gtest/gtest.h"
 #include "openvino/core/shape.hpp"
 #include "openvino/op/constant.hpp"
+#include "openvino/pass/manager.hpp"
 #include "ov_ops/rms.hpp"
 #include "shared_test_classes/base/ov_subgraph.hpp"
 #include "utils/cpu_test_utils.hpp"
-#include "openvino/pass/manager.hpp"
 
 using namespace CPUTestUtils;
 
@@ -74,12 +74,14 @@ void RMSNormLayerCPUTest::generate_inputs(const std::vector<ov::Shape>& targetIn
         }
     };
     create_input(function->get_parameters()[0], targetInputStaticShapes[0], 1.0f);
-    create_input(function->get_parameters()[1], targetInputStaticShapes[1], 0.0f);
-    for (size_t i = 0; i < targetInputStaticShapes[1].size() - 1; i++) {
-        if (targetInputStaticShapes[1][i] != 1) {
-            // decomposed rms expected
-            m_rms_decomposed = true;
-            break;
+    if (function->get_parameters().size() > 1) {
+        create_input(function->get_parameters()[1], targetInputStaticShapes[1], 0.0f);
+        for (size_t i = 0; i < targetInputStaticShapes[1].size() - 1; i++) {
+            if (targetInputStaticShapes[1][i] != 1) {
+                // decomposed rms expected
+                m_rms_decomposed = true;
+                break;
+            }
         }
     }
 }
@@ -99,12 +101,17 @@ void RMSNormLayerCPUTest::SetUp() {
     selectedType = makeSelectedTypeStr(selectedType, inType);
     init_input_shapes(inputShapes);
     ov::ParameterVector inputParams;
-    // data, scale
+    // data, optional scale (absent for RMS without gamma, i.e. elementwise_affine=false)
     auto data = std::make_shared<ov::op::v0::Parameter>(inType, inputDynamicShapes[0]);
     inputParams.push_back(data);
-    auto scale = std::make_shared<ov::op::v0::Parameter>(inType, inputDynamicShapes[1]);
-    inputParams.push_back(scale);
-    auto rms = std::make_shared<ov::op::internal::RMS>(data, scale, 0.1f);
+    std::shared_ptr<ov::op::internal::RMS> rms;
+    if (inputDynamicShapes.size() > 1) {
+        auto scale = std::make_shared<ov::op::v0::Parameter>(inType, inputDynamicShapes[1]);
+        inputParams.push_back(scale);
+        rms = std::make_shared<ov::op::internal::RMS>(data, scale, 0.1f);
+    } else {
+        rms = std::make_shared<ov::op::internal::RMS>(data, 0.1f);
+    }
     rms->set_friendly_name("rms");
     function = create_ov_model(inType, inputParams, rms, "rms");
 }
