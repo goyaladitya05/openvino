@@ -38,10 +38,13 @@ protected:
         ov::ParameterVector params{std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes[0]),
                                    std::make_shared<ov::op::v0::Parameter>(ov::element::f32, inputDynamicShapes[1])};
 
-        // rope table: angles up to ~ positions_max * freqs_max = 128 * 100 rad
+        // rope table: angles up to positions_max * freqs_max = 128 * 4 ~ 500 rad. Large enough that
+        // bf16 (~2 rad quantization at that magnitude) scrambles sin/cos without the f32 marking,
+        // yet small enough that f32 sin/cos implementations (CPU JIT vs reference backend) still
+        // agree — huge arguments diverge across range-reduction implementations even in f32.
         std::vector<float> freq_values(HIDDEN_SIZE);
         for (size_t i = 0; i < HIDDEN_SIZE; ++i) {
-            freq_values[i] = 0.01F * std::pow(10000.0F, static_cast<float>(i) / HIDDEN_SIZE);
+            freq_values[i] = 0.01F * std::pow(400.0F, static_cast<float>(i) / HIDDEN_SIZE);
         }
         auto freqs = utils::make_constant(ov::element::f32, ov::Shape{1, HIDDEN_SIZE}, freq_values);
         auto angles = std::make_shared<ov::op::v1::Multiply>(params[0], freqs);
