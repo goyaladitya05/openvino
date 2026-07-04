@@ -27,7 +27,12 @@ protected:
     void SetUp() override {
         targetDevice = utils::DEVICE_CPU;
         configuration.insert({ov::hint::inference_precision.name(), ov::element::bf16});
-        rel_threshold = abs_threshold = 0.05;
+        // Measured error scale with -1..1 weights: honest bf16 rounding through the three low
+        // precision stages (FC -> apply -> FC) gives abs errors up to ~0.2 on outputs of
+        // magnitude ~15; a broken build (angles in bf16) gives O(5) errors on many elements.
+        // The gate sits between the two with wide margins on both sides.
+        rel_threshold = 0.05;
+        abs_threshold = 0.5;
 
         const std::vector<InputShape> input_shapes = {
             {{-1, 1}, {{64, 1}, {128, 1}}},                                // positions
@@ -51,8 +56,9 @@ protected:
         auto cos = std::make_shared<ov::op::v0::Cos>(angles);
         auto sin = std::make_shared<ov::op::v0::Sin>(angles);
 
-        // projection (mandatory bf16)
-        auto proj_weights = utils::make_constant(ov::element::f32, ov::Shape{HIDDEN_SIZE, HIDDEN_SIZE});
+        // projection (mandatory bf16); -1..1 weights keep the bf16 noise floor at a known scale
+        ov::test::utils::InputGenerateData weights_data(-1, 2, 256);
+        auto proj_weights = utils::make_constant(ov::element::f32, ov::Shape{HIDDEN_SIZE, HIDDEN_SIZE}, weights_data);
         auto q = std::make_shared<ov::op::v0::MatMul>(params[1], proj_weights);
 
         // apply the table
@@ -60,7 +66,7 @@ protected:
         auto q_sin = std::make_shared<ov::op::v1::Multiply>(q, sin);
         auto rotated = std::make_shared<ov::op::v1::Add>(q_cos, q_sin);
 
-        auto out_weights = utils::make_constant(ov::element::f32, ov::Shape{HIDDEN_SIZE, HIDDEN_SIZE});
+        auto out_weights = utils::make_constant(ov::element::f32, ov::Shape{HIDDEN_SIZE, HIDDEN_SIZE}, weights_data);
         auto matmul = std::make_shared<ov::op::v0::MatMul>(rotated, out_weights);
 
         function = std::make_shared<ov::Model>(ov::OutputVector{std::make_shared<ov::op::v0::Result>(matmul)},
