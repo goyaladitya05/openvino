@@ -36,6 +36,7 @@
 #include "ov_ops/fully_connected.hpp"
 #include "transformations/cpu_opset/common/op/power_static.hpp"
 #include "transformations/rt_info/dequantization_node.hpp"
+#include "transformations/rt_info/disable_precision_conversion.hpp"
 #include "utils/general_utils.h"
 
 namespace {
@@ -184,6 +185,12 @@ ov::intel_cpu::ConvertToPowerStatic::ConvertToPowerStatic() {
         }
         toReplace->set_friendly_name(node->get_friendly_name());
         ov::copy_runtime_info(node, toReplace);
+        // DisablePrecisionConversion is non-copyable, so copy_runtime_info drops it — re-apply
+        // explicitly, otherwise precision-sensitive chains (e.g. RoPE angle computation) lose
+        // their f32 protection when lowered to PowerStatic
+        if (ov::is_conversion_disabled(node, ov::element::f16)) {
+            ov::disable_conversion(toReplace, ov::element::f16);
+        }
         ov::replace_node(node, toReplace);
         return true;
     };

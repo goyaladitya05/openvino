@@ -143,6 +143,7 @@
 
 // CPU specific transformations
 #include "transformations/cpu_opset/common/pass/insert_convert_after_extension.hpp"
+#include "transformations/cpu_opset/common/pass/mark_sin_cos_inputs_precision.hpp"
 #include "transformations/cpu_opset/common/pass/ngram_fusion.hpp"
 #include "transformations/cpu_opset/common/pass/permute_slice_n_interpolation.hpp"
 #include "transformations/cpu_opset/common/pass/stateful_sdpa_fusion.hpp"
@@ -1199,6 +1200,9 @@ void Transformations::PostLpt() {
     if (any_of(config.inferencePrecision, ov::element::bf16, ov::element::f16)) {
         CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::MarkRopeInputsToKeepInMixedPrecision);
         CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::pass::MarkFloatingPointRange);
+        // runtime-computed rope tables (RoPEFusion not applicable, e.g. LTX-Video 3-axis rope):
+        // the angle computation feeding Sin/Cos must stay in f32
+        CPU_REGISTER_PASS_COMMON(postLPTPassManager, ov::intel_cpu::MarkSinCosInputsPrecision);
     }
 
     // Should be before Snippets pipeline because Ngram pattern contains eltwise nodes that can be tokenized by
