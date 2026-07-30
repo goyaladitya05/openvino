@@ -242,7 +242,7 @@ bool convert_function_precision(ov::pass::PassBase& pass,
         pass::Manager manager(pass.get_pass_config(), "KeepPrecisionSensitiveInFP32");
         // Mark subgraphs with disable_fp16_compression to keep them in FP32
         manager.register_pass<pass::MarkSugraphsToKeepInMixedPrecision>();
-        manager.register_pass<pass::AlignMixedFP32FP16Types>();
+        manager.register_pass<pass::AlignMixedFP32FP16Types>(convert_input_output_precision);
         manager.run_passes(f);
     }
 

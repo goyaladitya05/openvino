@@ -22,5 +22,10 @@ class TRANSFORMATIONS_API AlignMixedFP32FP16Types;
 class ov::pass::AlignMixedFP32FP16Types : public ov::pass::ModelPass {
 public:
     OPENVINO_MODEL_PASS_RTTI("AlignMixedFP32FP16Types");
+    explicit AlignMixedFP32FP16Types(bool convert_input_output_precision = true)
+        : m_convert_input_output_precision(convert_input_output_precision) {}
     bool run_on_model(const std::shared_ptr<ov::Model>& m) override;
+
+private:
+    bool m_convert_input_output_precision;
 };

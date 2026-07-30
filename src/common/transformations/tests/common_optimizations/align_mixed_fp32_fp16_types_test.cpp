@@ -177,7 +177,9 @@ TEST_F(TransformationTestsF, align_mixed_fp16_fp32_result_consumer_not_narrowed)
 
         pass::Manager manager;
         manager.register_pass<pass::MarkSugraphsToKeepInMixedPrecision>();
-        manager.register_pass<pass::AlignMixedFP32FP16Types>();
+        // convert_input_output_precision=false: matches how CPU/GPU actually call ConvertPrecision --
+        // Results keep their original type, so this edge needs no boundary Convert at all.
+        manager.register_pass<pass::AlignMixedFP32FP16Types>(false);
         manager.run_passes(model);
     }
 

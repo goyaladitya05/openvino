@@ -64,8 +64,10 @@ bool ov::pass::AlignMixedFP32FP16Types::run_on_model(const std::shared_ptr<ov::M
                         continue;
                     if (!out_inputs.get_element_type().is_real())
                         continue;
-                    // Results aren't converted, so narrowing then immediately widening back is a no-op.
-                    if (ov::is_type<v0::Result>(out_node))
+                    // With convert_input_output_precision, a Result's own declared type is meant to
+                    // become f16, so this Convert is the real (non-redundant) narrowing for it.
+                    // Otherwise Results are never converted, so it'd just be a no-op round-trip.
+                    if (!m_convert_input_output_precision && ov::is_type<v0::Result>(out_node))
                         continue;
 
                     // element_type of this convert will be changed automatically to f16 after
