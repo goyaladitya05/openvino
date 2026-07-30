@@ -155,6 +155,54 @@ TEST_F(TransformationTestsF, align_mixed_fp16_fp32_3) {
     }
 }
 
+TEST_F(TransformationTestsF, align_mixed_fp16_fp32_result_consumer_not_narrowed) {
+    // A precision-sensitive value exposed directly as a second output must not get
+    // a boundary Convert -- Results aren't converted, so it'd just be a no-op round-trip.
+    {
+        auto input_1 = make_shared<Parameter>(element::f32, Shape{1, 3, 224, 224});
+        auto exp_1 = make_shared<Exp>(input_1);
+        auto input_2 = make_shared<Parameter>(element::f32, Shape{1, 3, 224, 224});
+        auto reduction_axes = Constant::create(element::i64, Shape{1}, {-1});
+
+        auto reduce_sum_1 = make_shared<ReduceSum>(exp_1, reduction_axes);
+        auto addition_const = Constant::create(element::f32, Shape{1}, {0.1f});
+        auto add_1 = make_shared<Add>(reduce_sum_1, addition_const);
+
+        auto factor_const = Constant::create(element::f16, Shape{1}, {-1});
+        auto factor_const_decompressed = make_shared<Convert>(factor_const, element::f32);
+        auto mul_1 = make_shared<Multiply>(add_1, factor_const_decompressed);
+        auto matmul_1 = make_shared<MatMul>(mul_1, input_2);
+
+        model = make_shared<Model>(OutputVector{matmul_1, add_1}, ParameterVector{input_1, input_2});
+
+        pass::Manager manager;
+        manager.register_pass<pass::MarkSugraphsToKeepInMixedPrecision>();
+        manager.register_pass<pass::AlignMixedFP32FP16Types>();
+        manager.run_passes(model);
+    }
+
+    {
+        auto input_1 = make_shared<Parameter>(element::f32, Shape{1, 3, 224, 224});
+        auto convert_to_f32_1 = make_shared<Convert>(input_1, element::f32);
+        auto exp_1 = make_shared<Exp>(convert_to_f32_1);
+        auto input_2 = make_shared<Parameter>(element::f32, Shape{1, 3, 224, 224});
+        auto reduction_axes = Constant::create(element::i64, Shape{1}, {-1});
+
+        auto reduce_sum_1 = make_shared<ReduceSum>(exp_1, reduction_axes);
+        auto addition_const = Constant::create(element::f32, Shape{1}, {0.1f});
+        auto add_1 = make_shared<Add>(reduce_sum_1, addition_const);
+
+        auto factor_const = Constant::create(element::f16, Shape{1}, {-1});
+        auto factor_const_decompressed = make_shared<Convert>(factor_const, element::f32);
+        auto mul_1 = make_shared<Multiply>(add_1, factor_const_decompressed);
+        auto convert_to_f16_1 = make_shared<Convert>(mul_1, element::f32);
+        auto matmul_1 = make_shared<MatMul>(convert_to_f16_1, input_2);
+
+        // add_1 stays wired directly to the second output -- no boundary Convert for that edge.
+        model_ref = make_shared<Model>(OutputVector{matmul_1, add_1}, ParameterVector{input_1, input_2});
+    }
+}
+
 TEST_F(TransformationTestsF, align_mixed_fp16_fp32_with_rand_uniform) {
     {
         auto input_1 = make_shared<Parameter>(element::f32, Shape{1, 3, 224, 224});
