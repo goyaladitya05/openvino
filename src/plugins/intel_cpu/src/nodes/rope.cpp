@@ -259,7 +259,6 @@ struct RoPE::RoPEExecutorLtxVideo : public RoPE::Executor {
         jcp.dst_prc = precision_of<T>::value;
         jcp.rotary_ndims = config.rotary_ndims;
         jcp.is_ltx_video = true;
-        // each step consumes 2 vectors, so the kernel needs rotary_ndims % (2 * vec_size) == 0
         m_rotaryKernel = createJitKernel(jcp, true);
     }
 

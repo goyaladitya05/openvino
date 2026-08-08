@@ -32,7 +32,6 @@ struct jit_rotary_compile_params {
     size_t cos_sin_ndims = 0UL;
     bool interleave = false;
     bool mix_cos_sin = false;
-    // LTX-Video: interleaved pairs with full-width cos/sin tables
     bool is_ltx_video = false;
 };
 
@@ -64,7 +63,6 @@ private:
     void rotary_half(size_t step);
     void rotary_interleave(size_t step);
     void rotary_ltx_video(size_t step);
-    // splits interleaved pairs into even/odd elements, in place
     void deinterlace(const Vmm& src0, const Vmm& src1, const Vmm& tmp0, const Vmm& tmp1);
     void load(const Vmm& vmm_dst,
               const Xbyak::Reg64& reg_src,
@@ -84,7 +82,6 @@ private:
     const Vmm vmm_dst0 = Vmm(4);
     const Vmm vmm_dst1 = Vmm(5);
     const Vmm vmm_idx = Vmm(7);
-    // LTX-Video only: odd-element halves of the cos/sin tables
     const Vmm vmm_cos2 = Vmm(8);
     const Vmm vmm_sin2 = Vmm(9);
     const Xbyak::Reg64 reg_src = r8;

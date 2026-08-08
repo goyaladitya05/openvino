@@ -214,8 +214,7 @@ void jit_rotary_kernel<isa>::rotary_ltx_video(size_t step) {
     //     dst[r]     = cos[r] * x[r] - sin[r] * x[r + 1];
     //     dst[r + 1] = sin[r + 1] * x[r] + cos[r + 1] * x[r + 1];
     // }
-    // unlike the interleaved case the cos/sin tables are full width, so they are
-    // deinterlaced as well: even elements drive dst[r], odd elements dst[r + 1].
+    // cos/sin tables are full width here, so they are deinterlaced as well
     load(vmm_src0, reg_src, m_jcp.src_prc, step, false);
     load(vmm_src1, reg_src, m_jcp.src_prc, step, false, step * m_jcp.src_prc.size());
     deinterlace(vmm_src0, vmm_src1, vmm_dst0, vmm_dst1);
