@@ -6,7 +6,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <oneapi/dnnl/dnnl_common.hpp>
 #include <string>
@@ -261,11 +260,6 @@ struct RoPE::RoPEExecutorLtxVideo : public RoPE::Executor {
         jcp.rotary_ndims = config.rotary_ndims;
         jcp.is_ltx_video = true;
         m_rotaryKernel = createJitKernel(jcp, true);
-        // TEMPORARY DEBUG - remove before merge
-        printf("[LTX] jit kernel = %s (rotary_ndims=%zu)\n",
-               m_rotaryKernel ? "ACTIVE" : "NULL -> scalar fallback",
-               config.rotary_ndims);
-        fflush(stdout);
     }
 
     void execute([[maybe_unused]] const dnnl::stream& strm,
