@@ -38,13 +38,9 @@ void jit_rotary_kernel<isa>::generate() {
         // higher 64bit/128 lane
         //           16-18      20-22      24-26       28-30
         static const uint64_t mask_zmm[] = {0, 4, 1, 5, 2, 6, 3, 7};
-        if (isa == cpu_isa_t::avx512_core) {
+        if (!m_jcp.is_ltx_video && isa == cpu_isa_t::avx512_core) {
             mov(reg_tmp, reinterpret_cast<uintptr_t>(mask_zmm));
             uni_vmovups(vmm_idx, ptr[reg_tmp]);
-        }
-        if (m_jcp.is_ltx_video) {
-            uni_vpxor(vmm_cos2, vmm_cos2, vmm_cos2);
-            uni_vpxor(vmm_sin2, vmm_sin2, vmm_sin2);
         }
         auto half_rotary_ndims = m_jcp.rotary_ndims / 2;
         for (size_t i = 0; i < half_rotary_ndims / vec_size; i++) {
@@ -214,44 +210,21 @@ void jit_rotary_kernel<isa>::rotary_ltx_video(size_t step) {
     //     dst[r]     = cos[r] * x[r] - sin[r] * x[r + 1];
     //     dst[r + 1] = sin[r + 1] * x[r] + cos[r + 1] * x[r + 1];
     // }
-    // cos/sin tables are full width here, so they are deinterlaced as well
-    load(vmm_src0, reg_src, m_jcp.src_prc, step, false);
-    load(vmm_src1, reg_src, m_jcp.src_prc, step, false, step * m_jcp.src_prc.size());
-    deinterlace(vmm_src0, vmm_src1, vmm_dst0, vmm_dst1);
-
-    // cos[r], cos[r + 1]
-    load(vmm_cos, reg_cos, ov::element::f32, step, false);
-    load(vmm_cos2, reg_cos, ov::element::f32, step, false, step * sizeof(float));
-    deinterlace(vmm_cos, vmm_cos2, vmm_dst0, vmm_dst1);
-
-    // sin[r], sin[r + 1]
-    load(vmm_sin, reg_sin, ov::element::f32, step, false);
-    load(vmm_sin2, reg_sin, ov::element::f32, step, false, step * sizeof(float));
-    deinterlace(vmm_sin, vmm_sin2, vmm_dst0, vmm_dst1);
-
-    // sin[r] * x[r + 1]
-    uni_vmulps(vmm_dst0, vmm_sin, vmm_src1);
-    // cos[r] * x[r] - sin[r] * x[r + 1]
-    vfmsub231ps(vmm_dst0, vmm_cos, vmm_src0);
-
-    // cos[r + 1] * x[r + 1]
-    uni_vmulps(vmm_dst1, vmm_cos2, vmm_src1);
-    // sin[r + 1] * x[r] + cos[r + 1] * x[r + 1]
-    vfmadd231ps(vmm_dst1, vmm_sin2, vmm_src0);
-
-    if (isa == cpu_isa_t::avx2) {
-        vunpcklps(vmm_cos, vmm_dst0, vmm_dst1);
-        vunpckhps(vmm_sin, vmm_dst0, vmm_dst1);
-        vperm2i128(vmm_dst0, vmm_cos, vmm_sin, 0x20);
-        vperm2i128(vmm_dst1, vmm_cos, vmm_sin, 0x31);
-    } else {
-        vpermq(vmm_cos, vmm_idx, vmm_dst0);
-        vpermq(vmm_sin, vmm_idx, vmm_dst1);
-        vunpcklps(vmm_dst0, vmm_cos, vmm_sin);
-        vunpckhps(vmm_dst1, vmm_cos, vmm_sin);
+    // with xs[i] = x[i ^ 1] both lines collapse to dst[i] = cos[i] * x[i] -/+ sin[i] * xs[i]
+    // (sub on even lanes, add on odd), which is exactly vfmaddsub - no deinterleaving needed
+    for (size_t half = 0; half < 2; half++) {
+        const size_t off = half * step;
+        load(vmm_src0, reg_src, m_jcp.src_prc, step, false, off * m_jcp.src_prc.size());
+        load(vmm_cos, reg_cos, ov::element::f32, step, false, off * sizeof(float));
+        load(vmm_sin, reg_sin, ov::element::f32, step, false, off * sizeof(float));
+        // xs: swap adjacent pair elements, pairs never cross 128-bit lanes
+        vpermilps(vmm_src1, vmm_src0, 0xB1);
+        // sin[i] * xs[i]
+        uni_vmulps(vmm_dst0, vmm_sin, vmm_src1);
+        // cos[i] * x[i] -/+ sin[i] * xs[i]
+        vfmaddsub231ps(vmm_dst0, vmm_cos, vmm_src0);
+        store(reg_dst, vmm_dst0, m_jcp.dst_prc, step, off * m_jcp.dst_prc.size());
     }
-    store(reg_dst, vmm_dst0, m_jcp.dst_prc, step);
-    store(reg_dst, vmm_dst1, m_jcp.dst_prc, step, step * m_jcp.dst_prc.size());
 
     add(reg_src, m_jcp.src_prc.size() * step * 2);
     add(reg_dst, m_jcp.dst_prc.size() * step * 2);
